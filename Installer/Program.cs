@@ -17,7 +17,7 @@ namespace PicallSetup
     internal static class Program
     {
         public const string ProductName = "Picall";
-        public const string Version = "1.2.1";
+        public const string Version = "1.2.2";
         public static readonly string InstallDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Picall");
 
@@ -196,7 +196,7 @@ namespace PicallSetup
 
             Controls.Add(new Label
             {
-                Text = "PICALL  1.2.1", Location = new Point(142, 43), AutoSize = true,
+                Text = "PICALL  1.2.2", Location = new Point(142, 43), AutoSize = true,
                 Font = new Font("Segoe UI", 10f, FontStyle.Bold), ForeColor = Color.FromArgb(167, 139, 250)
             });
             Controls.Add(new Label

@@ -29,6 +29,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly DispatcherTimer _batchRefreshTimer;
     private readonly DispatcherTimer _indexSaveTimer;
     private readonly DispatcherTimer _driveCheckTimer;
+    private readonly DispatcherTimer _thumbnailGcTimer;
+    private readonly Dictionary<FrameworkElement, CancellationTokenSource> _thumbnailRequests = [];
     private CancellationTokenSource? _scanCancellation;
     private MediaWatcher? _watcher;
     private List<MediaItem> _allItems = [];
@@ -49,6 +51,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _pendingViewRefresh;
     private bool _applyingPendingRefresh;
     private int _pendingNewItems;
+    private int _releasedThumbnailCount;
 
     public MainWindow()
     {
@@ -90,6 +93,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 RebuildSources();
                 await StartScanAsync();
             }
+        };
+        _thumbnailGcTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+        _thumbnailGcTimer.Tick += (_, _) =>
+        {
+            _thumbnailGcTimer.Stop();
+            _releasedThumbnailCount = 0;
+            GC.Collect(2, GCCollectionMode.Optimized, false, false);
         };
     }
 
@@ -454,11 +464,45 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void MediaCard_Loaded(object sender, RoutedEventArgs e)
     {
-        if (sender is not FrameworkElement { DataContext: MediaItem item } || item.Thumbnail is not null || item.ThumbnailRequested) return;
+        if (sender is not FrameworkElement card || card.DataContext is not MediaItem item || item.Thumbnail is not null || item.ThumbnailRequested) return;
+        if (_thumbnailRequests.Remove(card, out var previousRequest))
+        {
+            previousRequest.Cancel();
+        }
+        var request = new CancellationTokenSource();
+        _thumbnailRequests[card] = request;
         item.ThumbnailRequested = true;
-        try { item.Thumbnail = await _thumbnails.GetAsync(item); }
+        try
+        {
+            var thumbnail = await _thumbnails.GetAsync(item, request.Token);
+            if (card.IsLoaded && ReferenceEquals(card.DataContext, item)) item.Thumbnail = thumbnail;
+        }
         catch (OperationCanceledException) { }
         catch (Exception ex) { TryLog(ex); }
+        finally
+        {
+            if (_thumbnailRequests.TryGetValue(card, out var currentRequest) && ReferenceEquals(currentRequest, request))
+                _thumbnailRequests.Remove(card);
+            request.Dispose();
+            if (!card.IsLoaded || !ReferenceEquals(card.DataContext, item)) ReleaseThumbnail(item);
+            item.ThumbnailRequested = false;
+        }
+    }
+
+    private void MediaCard_Unloaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement card || card.DataContext is not MediaItem item) return;
+        if (_thumbnailRequests.Remove(card, out var request)) request.Cancel();
+        ReleaseThumbnail(item);
+    }
+
+    private void ReleaseThumbnail(MediaItem item)
+    {
+        if (item.Thumbnail is null) return;
+        item.Thumbnail = null;
+        if (++_releasedThumbnailCount < 96) return;
+        _thumbnailGcTimer.Stop();
+        _thumbnailGcTimer.Start();
     }
 
     private void MediaCard_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -881,6 +925,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         App.WriteStartupLog("Main window closing");
         _scanCancellation?.Cancel();
         _driveCheckTimer.Stop();
+        _thumbnailGcTimer.Stop();
+        foreach (var request in _thumbnailRequests.Values) request.Cancel();
+        _thumbnailRequests.Clear();
         _watcher?.Dispose();
         _settings.TileWidth = TileWidth;
         _settings.ExtraFolders = ExtraFolders.ToList();
@@ -897,6 +944,23 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (string.Equals(Environment.GetEnvironmentVariable("PICALL_QA_MAXIMIZED"), "1", StringComparison.Ordinal))
                 WindowState = WindowState.Maximized;
             await Task.Delay(700);
+            if (int.TryParse(Environment.GetEnvironmentVariable("PICALL_QA_SCROLL_STEPS"), out var scrollSteps) && scrollSteps > 0 &&
+                FindVisualChild<ScrollViewer>(GalleryList) is { } galleryScroller)
+            {
+                scrollSteps = Math.Clamp(scrollSteps, 1, 200);
+                var process = Process.GetCurrentProcess();
+                process.Refresh();
+                var memoryBefore = process.PrivateMemorySize64;
+                for (var step = 0; step <= scrollSteps; step++)
+                {
+                    galleryScroller.ScrollToVerticalOffset(galleryScroller.ScrollableHeight * step / scrollSteps);
+                    await Task.Delay(55);
+                }
+                galleryScroller.ScrollToTop();
+                await Task.Delay(4000);
+                process.Refresh();
+                App.WriteStartupLog($"QA scroll memory: {memoryBefore / 1048576d:0.0} MB -> {process.PrivateMemorySize64 / 1048576d:0.0} MB ({scrollSteps} steps)");
+            }
             UpdateLayout();
             var dpi = VisualTreeHelper.GetDpi(this);
             var width = Math.Max(1, (int)Math.Round(ActualWidth * dpi.DpiScaleX));

@@ -13,6 +13,8 @@ namespace Picall.Services;
 
 public sealed class ThumbnailService : IDisposable
 {
+    private const int ThumbnailWidth = 360;
+    private const int ThumbnailHeight = 240;
     private static readonly HashSet<string> MagickPreferredExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".jxl", ".svg", ".exr", ".hdr", ".qoi", ".jp2", ".j2k", ".j2c", ".jpf", ".jpx",
@@ -21,11 +23,18 @@ public sealed class ThumbnailService : IDisposable
     };
     private readonly SemaphoreSlim _workers = new(4, 4);
     private readonly ConcurrentDictionary<string, WeakReference<BitmapSource>> _memory = new(StringComparer.OrdinalIgnoreCase);
+    private int _requestsSinceSweep;
     private bool _disposed;
 
     public async Task<BitmapSource?> GetAsync(MediaItem item, CancellationToken cancellationToken = default)
     {
         if (_disposed) return null;
+        if (Interlocked.Increment(ref _requestsSinceSweep) >= 256)
+        {
+            Interlocked.Exchange(ref _requestsSinceSweep, 0);
+            foreach (var entry in _memory)
+                if (!entry.Value.TryGetTarget(out _)) _memory.TryRemove(entry.Key, out _);
+        }
         var key = CreateKey(item);
         if (_memory.TryGetValue(key, out var weak) && weak.TryGetTarget(out var memoryImage)) return memoryImage;
 
@@ -81,7 +90,7 @@ public sealed class ThumbnailService : IDisposable
         }
         if (image is null)
         {
-            try { image = ShellThumbnail.Get(item.Path, 480, 320); } catch { }
+            try { image = ShellThumbnail.Get(item.Path, ThumbnailWidth, ThumbnailHeight); } catch { }
         }
         if (image is null && item.Kind == MediaKind.Photo)
         {
@@ -91,7 +100,7 @@ public sealed class ThumbnailService : IDisposable
                 bitmap.BeginInit();
                 bitmap.CacheOption = BitmapCacheOption.OnLoad;
                 bitmap.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;
-                bitmap.DecodePixelWidth = 480;
+                bitmap.DecodePixelWidth = ThumbnailWidth;
                 bitmap.UriSource = new Uri(item.Path);
                 bitmap.EndInit();
                 bitmap.Freeze();
@@ -127,7 +136,7 @@ public sealed class ThumbnailService : IDisposable
         var settings = new MagickReadSettings { BackgroundColor = MagickColors.Transparent };
         using var magick = new MagickImage(path, settings);
         magick.AutoOrient();
-        magick.Thumbnail(480, 320);
+        magick.Thumbnail(ThumbnailWidth, ThumbnailHeight);
         magick.Strip();
         using var encoded = new MemoryStream();
         magick.Write(encoded, MagickFormat.Png);
@@ -157,7 +166,7 @@ public sealed class ThumbnailService : IDisposable
 
     private static string CreateKey(MediaItem item)
     {
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes($"THUMB04|{item.Path.ToUpperInvariant()}|{item.ModifiedUtc.Ticks}|{item.Size}"));
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes($"THUMB05|{item.Path.ToUpperInvariant()}|{item.ModifiedUtc.Ticks}|{item.Size}"));
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 

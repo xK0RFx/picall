@@ -234,14 +234,14 @@
     </Style>
 
     <Style x:Key="SliderThumb" TargetType="Thumb">
-      <Setter Property="Width" Value="15"/>
-      <Setter Property="Height" Value="15"/>
+      <Setter Property="Width" Value="16"/>
+      <Setter Property="Height" Value="16"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Thumb">
-            <Grid>
-              <Ellipse x:Name="ThumbGlow" Fill="#332A48" Width="15" Height="15"/>
-              <Ellipse x:Name="ThumbCore" Fill="#A78BFA" Width="11" Height="11"/>
+            <Grid Width="16" Height="16" ClipToBounds="False">
+              <Ellipse x:Name="ThumbGlow" Fill="#332A48" Width="16" Height="16"/>
+              <Ellipse x:Name="ThumbCore" Fill="#A78BFA" Width="12" Height="12"/>
             </Grid>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ThumbGlow" Property="Fill" Value="#554272"/><Setter TargetName="ThumbCore" Property="Fill" Value="#C4B5FD"/></Trigger>
@@ -253,13 +253,15 @@
     </Style>
 
     <Style x:Key="DarkSlider" TargetType="Slider">
-      <Setter Property="Height" Value="24"/>
+      <Setter Property="Height" Value="28"/>
+      <Setter Property="MinHeight" Value="28"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Slider">
-            <Grid>
-              <Track x:Name="PART_Track" Height="16" VerticalAlignment="Center"
+            <Grid ClipToBounds="False" Background="Transparent">
+              <Track x:Name="PART_Track" Height="24" VerticalAlignment="Center"
                      Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}" Value="{TemplateBinding Value}">
                 <Track.DecreaseRepeatButton>
                   <RepeatButton Command="{x:Static Slider.DecreaseLarge}" Focusable="False">
@@ -442,7 +444,7 @@
         </Border>
 
         <Grid Grid.Column="1">
-          <Grid.RowDefinitions><RowDefinition Height="104"/><RowDefinition Height="*"/><RowDefinition Height="38"/></Grid.RowDefinitions>
+          <Grid.RowDefinitions><RowDefinition Height="104"/><RowDefinition Height="*"/><RowDefinition Height="44"/></Grid.RowDefinitions>
           <Grid Grid.Row="0" Margin="30,20,30,16">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="320"/><ColumnDefinition Width="12"/><ColumnDefinition Width="150"/><ColumnDefinition Width="10"/><ColumnDefinition Width="44"/></Grid.ColumnDefinitions>
             <StackPanel VerticalAlignment="Center">
@@ -554,7 +556,7 @@
               <ListBox.ItemTemplate>
                 <DataTemplate DataType="{x:Type models:MediaItem}">
                   <Border x:Name="Card" Margin="8" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="14"
-                          Loaded="MediaCard_Loaded" MouseLeftButtonDown="MediaCard_MouseLeftButtonDown">
+                          Loaded="MediaCard_Loaded" Unloaded="MediaCard_Unloaded" MouseLeftButtonDown="MediaCard_MouseLeftButtonDown">
                     <Border.ContextMenu>
                       <ContextMenu>
                         <MenuItem Header="Открыть" Click="OpenMenu_Click"/>
