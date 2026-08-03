@@ -1008,7 +1008,23 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 process.Refresh();
                 App.WriteStartupLog($"QA scroll memory: {memoryBefore / 1048576d:0.0} MB -> {process.PrivateMemorySize64 / 1048576d:0.0} MB ({scrollSteps * scrollRounds} steps)");
             }
+            if (double.TryParse(Environment.GetEnvironmentVariable("PICALL_QA_SCROLL_PERCENT"),
+                    System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var scrollPercent) &&
+                FindVisualChild<ScrollViewer>(GalleryList) is { } positionedScroller)
+            {
+                positionedScroller.ScrollToVerticalOffset(positionedScroller.ScrollableHeight * Math.Clamp(scrollPercent, 0, 100) / 100);
+                await Task.Delay(200);
+            }
             UpdateLayout();
+            if (FindVisualChild<ScrollBar>(GalleryList) is { } qaScrollBar &&
+                FindVisualChild<Track>(qaScrollBar) is { } qaTrack &&
+                qaTrack.Thumb is { } qaThumb)
+            {
+                var qaThumbBody = qaThumb.Template.FindName("ThumbBody", qaThumb) as FrameworkElement;
+                var qaThumbPoint = qaThumb.TranslatePoint(new Point(), this);
+                var qaBodyPoint = qaThumbBody?.TranslatePoint(new Point(), this);
+                App.WriteStartupLog($"QA scrollbar: range={qaScrollBar.Minimum:0.##}-{qaScrollBar.Maximum:0.##}, viewport={qaScrollBar.ViewportSize:0.##}, track={qaTrack.ActualHeight:0.##}, thumb actual={qaThumb.ActualHeight:0.##}, desired={qaThumb.DesiredSize.Height:0.##}, height={qaThumb.Height:0.##}, min={qaThumb.MinHeight:0.##}, body={qaThumbBody?.ActualHeight:0.##}, thumbY={qaThumbPoint.Y:0.##}, bodyY={qaBodyPoint?.Y:0.##}");
+            }
             var dpi = VisualTreeHelper.GetDpi(this);
             var width = Math.Max(1, (int)Math.Round(ActualWidth * dpi.DpiScaleX));
             var height = Math.Max(1, (int)Math.Round(ActualHeight * dpi.DpiScaleY));

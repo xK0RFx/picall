@@ -160,6 +160,7 @@
 
     <Style x:Key="VerticalScrollThumb" TargetType="Thumb">
       <Setter Property="MinHeight" Value="40"/>
+      <Setter Property="Height" Value="40"/>
       <Setter Property="Margin" Value="0"/>
       <Setter Property="Template">
         <Setter.Value>
@@ -178,6 +179,7 @@
 
     <Style x:Key="HorizontalScrollThumb" TargetType="Thumb">
       <Setter Property="MinWidth" Value="36"/>
+      <Setter Property="Width" Value="36"/>
       <Setter Property="Margin" Value="0"/>
       <Setter Property="Template">
         <Setter.Value>
@@ -201,7 +203,9 @@
         <Setter.Value>
           <ControlTemplate TargetType="ScrollBar">
             <Border Background="#14181E" CornerRadius="6" Margin="1">
-              <Track x:Name="PART_Track" IsDirectionReversed="True" Orientation="Vertical">
+              <Track x:Name="PART_Track" IsDirectionReversed="True" Orientation="Vertical"
+                     Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}"
+                     Value="{TemplateBinding Value}" ViewportSize="NaN">
                 <Track.DecreaseRepeatButton>
                   <RepeatButton Command="{x:Static ScrollBar.PageUpCommand}" Focusable="False">
                     <RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent"/></ControlTemplate></RepeatButton.Template>
@@ -226,7 +230,9 @@
             <Setter.Value>
               <ControlTemplate TargetType="ScrollBar">
                 <Border Background="#14181E" CornerRadius="6" Margin="1">
-                  <Track x:Name="PART_Track" IsDirectionReversed="False" Orientation="Horizontal">
+                  <Track x:Name="PART_Track" IsDirectionReversed="False" Orientation="Horizontal"
+                         Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}"
+                         Value="{TemplateBinding Value}" ViewportSize="NaN">
                     <Track.DecreaseRepeatButton>
                       <RepeatButton Command="{x:Static ScrollBar.PageLeftCommand}" Focusable="False">
                         <RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent"/></ControlTemplate></RepeatButton.Template>
