@@ -1,0 +1,32 @@
+# .NET build output
+bin/
+obj/
+dist/
+publish/
+artifacts/
+TestResults/
+
+# Local SDK and package caches
+.dotnet-home/
+.nuget-packages/
+packages/
+
+# IDE state
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Picall QA and local runtime files
+.qa-*/
+.qa-*.png
+*.log
+*.tmp
+
+# OS metadata
+.DS_Store
+Thumbs.db
+Desktop.ini

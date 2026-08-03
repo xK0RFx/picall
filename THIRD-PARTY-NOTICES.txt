@@ -1,0 +1,11 @@
+Picall uses Magick.NET and ImageMagick for local thumbnail decoding of modern and specialist image formats.
+
+Magick.NET
+Copyright 2013-2026 Dirk Lemstra
+Licensed under the Apache License, Version 2.0.
+https://github.com/dlemstra/Magick.NET
+
+ImageMagick
+Copyright 1999 ImageMagick Studio LLC
+Licensed under the ImageMagick License.
+https://imagemagick.org/script/license.php
