@@ -11,7 +11,10 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         AppPaths.EnsureCreated();
-        _singleInstanceMutex = new Mutex(true, "Local\\Picall.SingleInstance", out var isFirstInstance);
+        var mutexName = string.Equals(Environment.GetEnvironmentVariable("PICALL_QA_ALLOW_MULTIPLE"), "1", StringComparison.Ordinal)
+            ? $"Local\\Picall.QA.{Environment.ProcessId}"
+            : "Local\\Picall.SingleInstance";
+        _singleInstanceMutex = new Mutex(true, mutexName, out var isFirstInstance);
         if (!isFirstInstance)
         {
             MessageBox.Show("Picall уже открыт.", "Picall", MessageBoxButton.OK, MessageBoxImage.Information);

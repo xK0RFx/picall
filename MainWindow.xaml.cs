@@ -20,6 +20,7 @@ namespace Picall;
 
 public partial class MainWindow : Window, INotifyPropertyChanged
 {
+    private const long MemoryTrimThresholdBytes = 550L * 1024 * 1024;
     private enum LibraryFilter { All, Photos, Videos, Favorites }
 
     private readonly AppSettings _settings;
@@ -100,6 +101,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             _thumbnailGcTimer.Stop();
             _releasedThumbnailCount = 0;
+            using var process = Process.GetCurrentProcess();
+            process.Refresh();
+            if (process.PrivateMemorySize64 < MemoryTrimThresholdBytes) return;
+            _thumbnails.TrimMemoryCache();
             GC.Collect(2, GCCollectionMode.Forced, false, false);
         };
     }
@@ -995,6 +1000,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 var process = Process.GetCurrentProcess();
                 process.Refresh();
                 var memoryBefore = process.PrivateMemorySize64;
+                var cpuBefore = process.TotalProcessorTime;
                 for (var round = 0; round < scrollRounds; round++)
                 {
                     for (var step = 0; step <= scrollSteps; step++)
@@ -1006,7 +1012,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 galleryScroller.ScrollToTop();
                 await Task.Delay(4000);
                 process.Refresh();
-                App.WriteStartupLog($"QA scroll memory: {memoryBefore / 1048576d:0.0} MB -> {process.PrivateMemorySize64 / 1048576d:0.0} MB ({scrollSteps * scrollRounds} steps)");
+                App.WriteStartupLog($"QA scroll memory: {memoryBefore / 1048576d:0.0} MB -> {process.PrivateMemorySize64 / 1048576d:0.0} MB, CPU +{(process.TotalProcessorTime - cpuBefore).TotalSeconds:0.0}s ({scrollSteps * scrollRounds} steps)");
             }
             if (double.TryParse(Environment.GetEnvironmentVariable("PICALL_QA_SCROLL_PERCENT"),
                     System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var scrollPercent) &&
