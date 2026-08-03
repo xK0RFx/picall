@@ -159,12 +159,14 @@
     </Style>
 
     <Style x:Key="VerticalScrollThumb" TargetType="Thumb">
-      <Setter Property="MinHeight" Value="36"/>
-      <Setter Property="Margin" Value="3,2"/>
+      <Setter Property="MinHeight" Value="40"/>
+      <Setter Property="Margin" Value="0"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Thumb">
-            <Border x:Name="ThumbBody" Background="#56606E" CornerRadius="3"/>
+            <Grid Background="Transparent">
+              <Border x:Name="ThumbBody" Background="#56606E" CornerRadius="3" Margin="3,2"/>
+            </Grid>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ThumbBody" Property="Background" Value="#7D6BA7"/></Trigger>
               <Trigger Property="IsDragging" Value="True"><Setter TargetName="ThumbBody" Property="Background" Value="#9B7CF2"/></Trigger>
@@ -174,10 +176,22 @@
       </Setter>
     </Style>
 
-    <Style x:Key="HorizontalScrollThumb" TargetType="Thumb" BasedOn="{StaticResource VerticalScrollThumb}">
-      <Setter Property="MinHeight" Value="0"/>
+    <Style x:Key="HorizontalScrollThumb" TargetType="Thumb">
       <Setter Property="MinWidth" Value="36"/>
-      <Setter Property="Margin" Value="2,3"/>
+      <Setter Property="Margin" Value="0"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Thumb">
+            <Grid Background="Transparent">
+              <Border x:Name="ThumbBody" Background="#56606E" CornerRadius="3" Margin="2,3"/>
+            </Grid>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ThumbBody" Property="Background" Value="#7D6BA7"/></Trigger>
+              <Trigger Property="IsDragging" Value="True"><Setter TargetName="ThumbBody" Property="Background" Value="#9B7CF2"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
     </Style>
 
     <Style TargetType="ScrollBar">
@@ -234,18 +248,16 @@
     </Style>
 
     <Style x:Key="SliderThumb" TargetType="Thumb">
-      <Setter Property="Width" Value="16"/>
-      <Setter Property="Height" Value="16"/>
+      <Setter Property="Width" Value="14"/>
+      <Setter Property="Height" Value="14"/>
+      <Setter Property="SnapsToDevicePixels" Value="True"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Thumb">
-            <Grid Width="16" Height="16" ClipToBounds="False">
-              <Ellipse x:Name="ThumbGlow" Fill="#332A48" Width="16" Height="16"/>
-              <Ellipse x:Name="ThumbCore" Fill="#A78BFA" Width="12" Height="12"/>
-            </Grid>
+            <Border x:Name="ThumbBody" Width="14" Height="14" Background="#A78BFA" BorderBrush="#352A49" BorderThickness="2" CornerRadius="7"/>
             <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ThumbGlow" Property="Fill" Value="#554272"/><Setter TargetName="ThumbCore" Property="Fill" Value="#C4B5FD"/></Trigger>
-              <Trigger Property="IsDragging" Value="True"><Setter TargetName="ThumbGlow" Property="Fill" Value="#7157A7"/><Setter TargetName="ThumbCore" Property="Fill" Value="White"/></Trigger>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ThumbBody" Property="Background" Value="#C4B5FD"/><Setter TargetName="ThumbBody" Property="BorderBrush" Value="#7157A7"/></Trigger>
+              <Trigger Property="IsDragging" Value="True"><Setter TargetName="ThumbBody" Property="Background" Value="White"/><Setter TargetName="ThumbBody" Property="BorderBrush" Value="#8B5CF6"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -256,22 +268,24 @@
       <Setter Property="Height" Value="28"/>
       <Setter Property="MinHeight" Value="28"/>
       <Setter Property="VerticalAlignment" Value="Center"/>
+      <Setter Property="UseLayoutRounding" Value="True"/>
+      <Setter Property="SnapsToDevicePixels" Value="True"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Slider">
-            <Grid ClipToBounds="False" Background="Transparent">
-              <Track x:Name="PART_Track" Height="24" VerticalAlignment="Center"
+            <Grid Background="Transparent">
+              <Track x:Name="PART_Track" Height="28" VerticalAlignment="Center"
                      Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}" Value="{TemplateBinding Value}">
                 <Track.DecreaseRepeatButton>
                   <RepeatButton Command="{x:Static Slider.DecreaseLarge}" Focusable="False">
-                    <RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Height="4" Background="#8B5CF6" CornerRadius="2" VerticalAlignment="Center"/></ControlTemplate></RepeatButton.Template>
+                    <RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Height="3" Background="#8B5CF6" CornerRadius="1.5" VerticalAlignment="Center" SnapsToDevicePixels="True"/></ControlTemplate></RepeatButton.Template>
                   </RepeatButton>
                 </Track.DecreaseRepeatButton>
                 <Track.Thumb><Thumb Style="{StaticResource SliderThumb}"/></Track.Thumb>
                 <Track.IncreaseRepeatButton>
                   <RepeatButton Command="{x:Static Slider.IncreaseLarge}" Focusable="False">
-                    <RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Height="4" Background="#303640" CornerRadius="2" VerticalAlignment="Center"/></ControlTemplate></RepeatButton.Template>
+                    <RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Height="3" Background="#303640" CornerRadius="1.5" VerticalAlignment="Center" SnapsToDevicePixels="True"/></ControlTemplate></RepeatButton.Template>
                   </RepeatButton>
                 </Track.IncreaseRepeatButton>
               </Track>
@@ -444,7 +458,7 @@
         </Border>
 
         <Grid Grid.Column="1">
-          <Grid.RowDefinitions><RowDefinition Height="104"/><RowDefinition Height="*"/><RowDefinition Height="44"/></Grid.RowDefinitions>
+          <Grid.RowDefinitions><RowDefinition Height="104"/><RowDefinition Height="*"/><RowDefinition Height="46"/></Grid.RowDefinitions>
           <Grid Grid.Row="0" Margin="30,20,30,16">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="320"/><ColumnDefinition Width="12"/><ColumnDefinition Width="150"/><ColumnDefinition Width="10"/><ColumnDefinition Width="44"/></Grid.ColumnDefinitions>
             <StackPanel VerticalAlignment="Center">

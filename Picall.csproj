@@ -9,7 +9,7 @@
     <AssemblyName>Picall</AssemblyName>
     <RootNamespace>Picall</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>1.2.2</Version>
+    <Version>1.2.3</Version>
     <Company>Picall</Company>
     <Product>Picall</Product>
     <Description>Fast local photo and video library for Windows.</Description>

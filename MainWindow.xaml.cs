@@ -31,6 +31,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly DispatcherTimer _driveCheckTimer;
     private readonly DispatcherTimer _thumbnailGcTimer;
     private readonly Dictionary<FrameworkElement, CancellationTokenSource> _thumbnailRequests = [];
+    private readonly HashSet<MediaItem> _loadedThumbnailItems = [];
     private CancellationTokenSource? _scanCancellation;
     private MediaWatcher? _watcher;
     private List<MediaItem> _allItems = [];
@@ -99,7 +100,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             _thumbnailGcTimer.Stop();
             _releasedThumbnailCount = 0;
-            GC.Collect(2, GCCollectionMode.Optimized, false, false);
+            GC.Collect(2, GCCollectionMode.Forced, false, false);
         };
     }
 
@@ -383,7 +384,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             var sourceCounts = sourceRoots.ToDictionary(root => root,
                 root => sourceScope.Count(x => IsWithinRoot(x.Path, root)), StringComparer.OrdinalIgnoreCase);
             return (
-                Items: (IReadOnlyList<MediaItem>)filtered.GroupBy(x => x.Path, StringComparer.OrdinalIgnoreCase).Select(x => x.First()).ToList(),
+                Items: (IReadOnlyList<MediaItem>)filtered.ToList(),
                 All: navigationScope.Count,
                 Photos: navigationScope.Count(x => x.Kind == MediaKind.Photo),
                 Videos: navigationScope.Count(x => x.Kind == MediaKind.Video),
@@ -402,6 +403,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         UpdateFilterBadge();
         if (!updateView) return;
 
+        PrepareThumbnailViewport(computation.Items);
         ClearPendingViewRefresh();
         DisplayedItems = computation.Items;
         ResultCountText.Text = ResultLabel(computation.Items.Count);
@@ -472,10 +474,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var request = new CancellationTokenSource();
         _thumbnailRequests[card] = request;
         item.ThumbnailRequested = true;
+        BitmapSource? thumbnail = null;
+        var assigned = false;
         try
         {
-            var thumbnail = await _thumbnails.GetAsync(item, request.Token);
-            if (card.IsLoaded && ReferenceEquals(card.DataContext, item)) item.Thumbnail = thumbnail;
+            await Task.Delay(140, request.Token);
+            if (!card.IsLoaded || !ReferenceEquals(card.DataContext, item)) return;
+            thumbnail = await _thumbnails.GetAsync(item, request.Token);
+            if (card.IsLoaded && ReferenceEquals(card.DataContext, item) && thumbnail is not null)
+            {
+                item.Thumbnail = thumbnail;
+                _loadedThumbnailItems.Add(item);
+                assigned = true;
+            }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { TryLog(ex); }
@@ -484,6 +495,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (_thumbnailRequests.TryGetValue(card, out var currentRequest) && ReferenceEquals(currentRequest, request))
                 _thumbnailRequests.Remove(card);
             request.Dispose();
+            if (!assigned && thumbnail is not null) ScheduleThumbnailCollection();
             if (!card.IsLoaded || !ReferenceEquals(card.DataContext, item)) ReleaseThumbnail(item);
             item.ThumbnailRequested = false;
         }
@@ -498,11 +510,31 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ReleaseThumbnail(MediaItem item)
     {
+        _loadedThumbnailItems.Remove(item);
         if (item.Thumbnail is null) return;
         item.Thumbnail = null;
-        if (++_releasedThumbnailCount < 96) return;
+        ScheduleThumbnailCollection();
+    }
+
+    private void ScheduleThumbnailCollection()
+    {
+        if (++_releasedThumbnailCount < 48) return;
         _thumbnailGcTimer.Stop();
         _thumbnailGcTimer.Start();
+    }
+
+    private void PrepareThumbnailViewport(IReadOnlyList<MediaItem> nextItems)
+    {
+        if (_loadedThumbnailItems.Count == 0 && _thumbnailRequests.Count == 0) return;
+        var retained = new HashSet<MediaItem>(nextItems);
+        foreach (var item in _loadedThumbnailItems.ToArray())
+            if (!retained.Contains(item)) ReleaseThumbnail(item);
+
+        foreach (var requestEntry in _thumbnailRequests.ToArray())
+        {
+            if (requestEntry.Key.DataContext is MediaItem item && retained.Contains(item)) continue;
+            if (_thumbnailRequests.Remove(requestEntry.Key)) requestEntry.Value.Cancel();
+        }
     }
 
     private void MediaCard_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -928,6 +960,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _thumbnailGcTimer.Stop();
         foreach (var request in _thumbnailRequests.Values) request.Cancel();
         _thumbnailRequests.Clear();
+        _loadedThumbnailItems.Clear();
         _watcher?.Dispose();
         _settings.TileWidth = TileWidth;
         _settings.ExtraFolders = ExtraFolders.ToList();
@@ -944,22 +977,36 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (string.Equals(Environment.GetEnvironmentVariable("PICALL_QA_MAXIMIZED"), "1", StringComparison.Ordinal))
                 WindowState = WindowState.Maximized;
             await Task.Delay(700);
+            var qaFormat = Environment.GetEnvironmentVariable("PICALL_QA_FORMAT");
+            if (!string.IsNullOrWhiteSpace(qaFormat))
+            {
+                var normalizedFormat = qaFormat.StartsWith('.') ? qaFormat : "." + qaFormat;
+                foreach (var format in FormatFilters)
+                    format.IsSelected = string.Equals(format.Extension, normalizedFormat, StringComparison.OrdinalIgnoreCase);
+                await ApplyFilterAsync();
+                await Task.Delay(300);
+            }
             if (int.TryParse(Environment.GetEnvironmentVariable("PICALL_QA_SCROLL_STEPS"), out var scrollSteps) && scrollSteps > 0 &&
                 FindVisualChild<ScrollViewer>(GalleryList) is { } galleryScroller)
             {
                 scrollSteps = Math.Clamp(scrollSteps, 1, 200);
+                var scrollRounds = int.TryParse(Environment.GetEnvironmentVariable("PICALL_QA_SCROLL_ROUNDS"), out var requestedRounds)
+                    ? Math.Clamp(requestedRounds, 1, 5) : 1;
                 var process = Process.GetCurrentProcess();
                 process.Refresh();
                 var memoryBefore = process.PrivateMemorySize64;
-                for (var step = 0; step <= scrollSteps; step++)
+                for (var round = 0; round < scrollRounds; round++)
                 {
-                    galleryScroller.ScrollToVerticalOffset(galleryScroller.ScrollableHeight * step / scrollSteps);
-                    await Task.Delay(55);
+                    for (var step = 0; step <= scrollSteps; step++)
+                    {
+                        galleryScroller.ScrollToVerticalOffset(galleryScroller.ScrollableHeight * step / scrollSteps);
+                        await Task.Delay(55);
+                    }
                 }
                 galleryScroller.ScrollToTop();
                 await Task.Delay(4000);
                 process.Refresh();
-                App.WriteStartupLog($"QA scroll memory: {memoryBefore / 1048576d:0.0} MB -> {process.PrivateMemorySize64 / 1048576d:0.0} MB ({scrollSteps} steps)");
+                App.WriteStartupLog($"QA scroll memory: {memoryBefore / 1048576d:0.0} MB -> {process.PrivateMemorySize64 / 1048576d:0.0} MB ({scrollSteps * scrollRounds} steps)");
             }
             UpdateLayout();
             var dpi = VisualTreeHelper.GetDpi(this);

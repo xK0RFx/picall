@@ -21,7 +21,7 @@ public sealed class ThumbnailService : IDisposable
         ".psd", ".psb", ".dds", ".tga", ".pcx", ".ppm", ".pgm", ".pbm", ".pnm", ".ras",
         ".xbm", ".xpm", ".jxr", ".wdp", ".hdp"
     };
-    private readonly SemaphoreSlim _workers = new(4, 4);
+    private readonly SemaphoreSlim _workers = new(2, 2);
     private readonly ConcurrentDictionary<string, WeakReference<BitmapSource>> _memory = new(StringComparer.OrdinalIgnoreCase);
     private int _requestsSinceSweep;
     private bool _disposed;
