@@ -10,6 +10,7 @@ public sealed class SourceOption : INotifyPropertyChanged
     public required string Name { get; init; }
     public required string Subtitle { get; init; }
     public required bool IsDrive { get; init; }
+    public required bool CanRemove { get; init; }
     public required int Count { get; init; }
     public string IconGlyph => IsDrive ? "\uEDA2" : "\uE8B7";
     public bool IsSelected
@@ -19,6 +20,13 @@ public sealed class SourceOption : INotifyPropertyChanged
     }
     public string CountLabel => Count.ToString("N0").Replace(',', ' ');
     public event PropertyChangedEventHandler? PropertyChanged;
+}
+
+public sealed class ExcludedPathOption
+{
+    public required string Path { get; init; }
+    public required string Kind { get; init; }
+    public required bool IsSource { get; init; }
 }
 
 public sealed class FormatFilterOption : INotifyPropertyChanged

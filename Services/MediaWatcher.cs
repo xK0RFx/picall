@@ -12,11 +12,13 @@ public sealed class MediaWatcher : IDisposable
     private readonly List<FileSystemWatcher> _watchers = [];
     private readonly ConcurrentDictionary<string, PendingChange> _pending = new(StringComparer.OrdinalIgnoreCase);
     private readonly Timer _timer;
+    private readonly IReadOnlySet<string> _excludedPaths;
     private bool _disposed;
 
-    public MediaWatcher(IEnumerable<string> roots, Action<IReadOnlyList<MediaFileChange>> callback)
+    public MediaWatcher(IEnumerable<string> roots, Action<IReadOnlyList<MediaFileChange>> callback, IEnumerable<string>? excludedPaths = null)
     {
         Callback = callback;
+        _excludedPaths = (excludedPaths ?? []).Select(MediaScanner.NormalizePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
         _timer = new Timer(Flush, null, 800, 800);
         foreach (var root in roots.Distinct(StringComparer.OrdinalIgnoreCase))
         {
@@ -44,18 +46,18 @@ public sealed class MediaWatcher : IDisposable
 
     private void OnUpsert(object sender, FileSystemEventArgs e)
     {
-        if (!MediaScanner.ShouldIgnorePath(e.FullPath) && MediaScanner.IsSupported(e.FullPath)) Queue(e.FullPath, MediaChangeKind.Upsert);
+        if (!MediaScanner.ShouldIgnorePath(e.FullPath, _excludedPaths) && MediaScanner.IsSupported(e.FullPath)) Queue(e.FullPath, MediaChangeKind.Upsert);
     }
 
     private void OnRemove(object sender, FileSystemEventArgs e)
     {
-        if (!MediaScanner.ShouldIgnorePath(e.FullPath) && MediaScanner.IsSupported(e.FullPath)) Queue(e.FullPath, MediaChangeKind.Remove);
+        if (!MediaScanner.ShouldIgnorePath(e.FullPath, _excludedPaths) && MediaScanner.IsSupported(e.FullPath)) Queue(e.FullPath, MediaChangeKind.Remove);
     }
 
     private void OnRenamed(object sender, RenamedEventArgs e)
     {
-        if (!MediaScanner.ShouldIgnorePath(e.OldFullPath) && MediaScanner.IsSupported(e.OldFullPath)) Queue(e.OldFullPath, MediaChangeKind.Remove);
-        if (!MediaScanner.ShouldIgnorePath(e.FullPath) && MediaScanner.IsSupported(e.FullPath)) Queue(e.FullPath, MediaChangeKind.Upsert);
+        if (!MediaScanner.ShouldIgnorePath(e.OldFullPath, _excludedPaths) && MediaScanner.IsSupported(e.OldFullPath)) Queue(e.OldFullPath, MediaChangeKind.Remove);
+        if (!MediaScanner.ShouldIgnorePath(e.FullPath, _excludedPaths) && MediaScanner.IsSupported(e.FullPath)) Queue(e.FullPath, MediaChangeKind.Upsert);
     }
 
     private void Queue(string path, MediaChangeKind kind) =>

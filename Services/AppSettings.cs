@@ -5,6 +5,8 @@ namespace Picall.Services;
 public sealed class AppSettings
 {
     public List<string> ExtraFolders { get; set; } = [];
+    public List<string> ExcludedSources { get; set; } = [];
+    public List<string> ExcludedPaths { get; set; } = [];
     public HashSet<string> FavoritePaths { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public double TileWidth { get; set; } = 194;
     public bool IncludePhotos { get; set; } = true;
@@ -21,9 +23,11 @@ public sealed class AppSettings
         {
             if (!File.Exists(AppPaths.SettingsFile)) return new AppSettings();
             var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(AppPaths.SettingsFile)) ?? new AppSettings();
-            settings.FavoritePaths = new HashSet<string>(settings.FavoritePaths, StringComparer.OrdinalIgnoreCase);
-            settings.ExcludedFormats = new HashSet<string>(settings.ExcludedFormats, StringComparer.OrdinalIgnoreCase);
-            settings.ExtraFolders = settings.ExtraFolders.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            settings.FavoritePaths = new HashSet<string>(settings.FavoritePaths ?? [], StringComparer.OrdinalIgnoreCase);
+            settings.ExcludedFormats = new HashSet<string>(settings.ExcludedFormats ?? [], StringComparer.OrdinalIgnoreCase);
+            settings.ExtraFolders = NormalizePaths(settings.ExtraFolders);
+            settings.ExcludedSources = NormalizePaths(settings.ExcludedSources);
+            settings.ExcludedPaths = NormalizePaths(settings.ExcludedPaths);
             return settings;
         }
         catch { return new AppSettings(); }
@@ -39,5 +43,18 @@ public sealed class AppSettings
             File.Move(temp, AppPaths.SettingsFile, true);
         }
         catch { }
+    }
+
+    private static List<string> NormalizePaths(IEnumerable<string>? paths)
+    {
+        return (paths ?? [])
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x =>
+            {
+                try { return Path.GetFullPath(Environment.ExpandEnvironmentVariables(x)).TrimEnd('\\', '/'); }
+                catch { return x.Trim(); }
+            })
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 }

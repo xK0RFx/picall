@@ -63,6 +63,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         TileWidth = Math.Clamp(_settings.TileWidth, 152, 264);
         ExtraFolders = new ObservableCollection<string>(_settings.ExtraFolders.Where(Directory.Exists));
         Sources = [];
+        ExcludedPathOptions = [];
         FormatFilters = [];
         UnavailableFormatFilters = [];
         InitializeComponent();
@@ -82,13 +83,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _indexSaveTimer.Tick += async (_, _) =>
         {
             _indexSaveTimer.Stop();
-            try { await IndexStore.SaveAsync(_allItems.ToArray()); } catch (Exception ex) { TryLog(ex); }
+            try { await IndexStore.SaveAsync(_allItems.ToArray(), _settings.ExcludedPaths); } catch (Exception ex) { TryLog(ex); }
         };
         _driveCheckTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
         _driveCheckTimer.Tick += async (_, _) =>
         {
             if (_isScanning) return;
-            var roots = MediaScanner.GetScanRoots(ExtraFolders);
+            var roots = MediaScanner.GetScanRoots(ExtraFolders, _settings.ExcludedSources, _settings.ExcludedPaths);
             var signature = RootSignature(roots);
             if (_scanRootSignature.Length > 0 && !string.Equals(signature, _scanRootSignature, StringComparison.OrdinalIgnoreCase))
             {
@@ -111,6 +112,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     public ObservableCollection<string> ExtraFolders { get; }
     public ObservableCollection<SourceOption> Sources { get; }
+    public ObservableCollection<ExcludedPathOption> ExcludedPathOptions { get; }
     public ObservableCollection<FormatFilterOption> FormatFilters { get; }
     public ObservableCollection<FormatFilterOption> UnavailableFormatFilters { get; }
     public int UnavailableFormatCount => UnavailableFormatFilters.Count;
@@ -173,7 +175,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         App.WriteStartupLog("Loading media index");
         SetScanState(false, "Загрузка…", "Читаю локальный индекс");
         var favorites = _settings.FavoritePaths;
-        var cached = await Task.Run(() => IndexStore.Load(favorites));
+        var cached = await Task.Run(() => IndexStore.Load(favorites, _settings.ExcludedPaths));
         _allItems = cached;
         _knownPaths = cached.Select(x => x.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
         UpdateCounts();
@@ -188,7 +190,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _scanCancellation?.Dispose();
         _scanCancellation = new CancellationTokenSource();
         var token = _scanCancellation.Token;
-        var roots = MediaScanner.GetScanRoots(ExtraFolders);
+        var roots = MediaScanner.GetScanRoots(ExtraFolders, _settings.ExcludedSources, _settings.ExcludedPaths);
         SetScanState(true, "Индексирую", "Ищу фото и видео…");
 
         var progress = new Progress<ScanProgress>(p =>
@@ -202,7 +204,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         try
         {
             var snapshot = _allItems.ToArray();
-            var result = await _scanner.ScanAsync(snapshot, roots, OnScannerBatch, progress, token);
+            var result = await _scanner.ScanAsync(snapshot, roots, OnScannerBatch, progress, token, _settings.ExcludedPaths);
             token.ThrowIfCancellationRequested();
             foreach (var item in result) item.IsFavorite = _settings.FavoritePaths.Contains(item.Path);
             _allItems = result;
@@ -213,7 +215,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             SetScanState(false, "Готово", $"{FormatNumber(result.Count)} файлов в медиатеке");
             StartWatcher(roots);
             ScheduleQaScreenshot();
-            await IndexStore.SaveAsync(result, token);
+            await IndexStore.SaveAsync(result, _settings.ExcludedPaths, token);
             App.WriteStartupLog($"Scan complete: {result.Count} items");
             _ = Task.Run(() => ThumbnailService.TrimDiskCache(), CancellationToken.None);
         }
@@ -231,7 +233,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void StartWatcher(IReadOnlyList<string> roots)
     {
         _watcher?.Dispose();
-        _watcher = new MediaWatcher(roots, OnMediaFilesChanged);
+        _watcher = new MediaWatcher(roots, OnMediaFilesChanged, _settings.ExcludedPaths);
         _scanRootSignature = RootSignature(roots);
     }
 
@@ -240,7 +242,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _ = Task.Run(() =>
         {
             var prepared = changes.Select(change => (change, item: change.Kind == MediaChangeKind.Upsert
-                ? MediaScanner.ReadMediaFile(change.Path) : null)).ToArray();
+                ? MediaScanner.ReadMediaFile(change.Path, false, _settings.ExcludedPaths) : null)).ToArray();
             Dispatcher.BeginInvoke(async () =>
             {
                 var changed = false;
@@ -334,7 +336,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var hasFormatOptions = FormatFilters.Count > 0;
         var nowUtc = DateTime.UtcNow;
         var queryTokens = query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var sourceRoots = MediaScanner.GetScanRoots(ExtraFolders).ToArray();
+        var sourceRoots = MediaScanner.GetScanRoots(ExtraFolders, _settings.ExcludedSources, _settings.ExcludedPaths).ToArray();
 
         var computation = await Task.Run(() =>
         {
@@ -719,14 +721,141 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             Multiselect = false
         };
         if (dialog.ShowDialog(this) != true) return;
-        var folder = Path.GetFullPath(dialog.FolderName).TrimEnd('\\');
+        var folder = MediaScanner.NormalizePath(dialog.FolderName);
         if (!ExtraFolders.Contains(folder, StringComparer.OrdinalIgnoreCase)) ExtraFolders.Add(folder);
+        _settings.ExcludedSources.RemoveAll(x => string.Equals(x, folder, StringComparison.OrdinalIgnoreCase));
+        _settings.ExcludedPaths.RemoveAll(x => string.Equals(x, folder, StringComparison.OrdinalIgnoreCase));
         _settings.ExtraFolders = ExtraFolders.ToList();
         _settings.Save();
         RebuildSources();
+        await RestartScanAfterSettingsChangeAsync();
+    }
+
+    private async void AddExcludedFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = "Выберите папку, которую нужно исключить",
+            Multiselect = false
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        AddExcludedPath(dialog.FolderName);
+        await RestartScanAfterSettingsChangeAsync();
+    }
+
+    private async void AddExcludedFile_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Выберите файл, который нужно исключить",
+            Filter = "Все файлы|*.*",
+            Multiselect = true,
+            CheckFileExists = true
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        foreach (var file in dialog.FileNames) AddExcludedPath(file);
+        await RestartScanAfterSettingsChangeAsync();
+    }
+
+    private async void RemoveSource_Click(object sender, RoutedEventArgs e)
+    {
+        if (GetSourceOption(sender) is not { } source || string.IsNullOrWhiteSpace(source.Root)) return;
+        await RemoveSourceAsync(source);
+    }
+
+    private async void RemoveSelectedSource_Click(object sender, RoutedEventArgs e)
+    {
+        var source = Sources.FirstOrDefault(x => x.IsSelected && !string.IsNullOrWhiteSpace(x.Root));
+        if (source is null) return;
+        await RemoveSourceAsync(source);
+    }
+
+    private async Task RemoveSourceAsync(SourceOption source)
+    {
+        var root = MediaScanner.NormalizePath(source.Root);
+        var extraFolder = ExtraFolders.FirstOrDefault(x => string.Equals(x, root, StringComparison.OrdinalIgnoreCase));
+        if (extraFolder is not null) ExtraFolders.Remove(extraFolder);
+        if (source.IsDrive) _settings.ExcludedSources.Add(root);
+        else _settings.ExcludedPaths.Add(root);
+        _settings.ExtraFolders = ExtraFolders.ToList();
+        if (string.Equals(_selectedSourceRoot, root, StringComparison.OrdinalIgnoreCase))
+        {
+            _selectedSourceRoot = null;
+            _settings.SelectedSource = null;
+        }
+        SaveExcludedSettings();
+        RebuildSources();
+        await RestartScanAfterSettingsChangeAsync();
+    }
+
+    private async void ExcludeSource_Click(object sender, RoutedEventArgs e)
+    {
+        if (GetSourceOption(sender) is not { } source || string.IsNullOrWhiteSpace(source.Root)) return;
+        var root = MediaScanner.NormalizePath(source.Root);
+        if (source.IsDrive) _settings.ExcludedSources.Add(root);
+        else _settings.ExcludedPaths.Add(root);
+        if (string.Equals(_selectedSourceRoot, root, StringComparison.OrdinalIgnoreCase))
+        {
+            _selectedSourceRoot = null;
+            _settings.SelectedSource = null;
+        }
+        SaveExcludedSettings();
+        RebuildSources();
+        await RestartScanAfterSettingsChangeAsync();
+    }
+
+    private async void RemoveExclusion_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: ExcludedPathOption option }) return;
+        if (option.IsSource)
+            _settings.ExcludedSources.RemoveAll(x => string.Equals(x, option.Path, StringComparison.OrdinalIgnoreCase));
+        else
+            _settings.ExcludedPaths.RemoveAll(x => string.Equals(x, option.Path, StringComparison.OrdinalIgnoreCase));
+        SaveExcludedSettings();
+        RebuildSources();
+        await RestartScanAfterSettingsChangeAsync();
+    }
+
+    private void ManageExclusions_Click(object sender, RoutedEventArgs e) => ExclusionsPopup.IsOpen = !ExclusionsPopup.IsOpen;
+
+    private async void ExcludeFileMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (GetItem(sender) is not { } item) return;
+        AddExcludedPath(item.Path);
+        await RestartScanAfterSettingsChangeAsync();
+    }
+
+    private void AddExcludedPath(string path)
+    {
+        var normalized = MediaScanner.NormalizePath(path);
+        _settings.ExcludedPaths.Add(normalized);
+        _settings.ExcludedPaths = _settings.ExcludedPaths
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        SaveExcludedSettings();
+        RefreshExcludedPathOptions();
+    }
+
+    private void SaveExcludedSettings()
+    {
+        _settings.ExcludedSources = _settings.ExcludedSources
+            .Select(MediaScanner.NormalizePath).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        _settings.ExcludedPaths = _settings.ExcludedPaths
+            .Select(MediaScanner.NormalizePath).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        _settings.Save();
+    }
+
+    private async Task RestartScanAfterSettingsChangeAsync()
+    {
         if (_isScanning) _scanCancellation?.Cancel();
-        await Task.Delay(120);
+        for (var i = 0; i < 80 && _isScanning; i++) await Task.Delay(50);
         await StartScanAsync();
+    }
+
+    private static SourceOption? GetSourceOption(object sender)
+    {
+        if (sender is FrameworkElement { DataContext: SourceOption source }) return source;
+        if (sender is MenuItem menu && menu.Parent is ContextMenu { PlacementTarget: FrameworkElement { DataContext: SourceOption placed } }) return placed;
+        return null;
     }
 
     private async void ScanButton_Click(object sender, RoutedEventArgs e)
@@ -769,13 +898,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void RebuildSources(IReadOnlyDictionary<string, int>? filteredCounts = null, int? allSourcesCount = null)
     {
-        var roots = MediaScanner.GetScanRoots(ExtraFolders);
+        var roots = MediaScanner.GetScanRoots(ExtraFolders, _settings.ExcludedSources, _settings.ExcludedPaths);
         var options = new List<SourceOption>
         {
             new()
             {
                 Root = string.Empty, Name = "Все диски", Subtitle = "Вся медиатека на компьютере",
-                IsDrive = true, Count = allSourcesCount ?? _allItems.Count, IsSelected = string.IsNullOrWhiteSpace(_selectedSourceRoot)
+                IsDrive = true, CanRemove = false, Count = allSourcesCount ?? _allItems.Count, IsSelected = string.IsNullOrWhiteSpace(_selectedSourceRoot)
             }
         };
         foreach (var root in roots)
@@ -784,7 +913,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             var name = SourceName(root, isDrive);
             options.Add(new SourceOption
             {
-                Root = root, Name = name, Subtitle = root, IsDrive = isDrive,
+                Root = root, Name = name, Subtitle = root, IsDrive = isDrive, CanRemove = !isDrive,
                 Count = filteredCounts is not null && filteredCounts.TryGetValue(root, out var filteredCount)
                     ? filteredCount : _allItems.Count(x => IsWithinRoot(x.Path, root)),
                 IsSelected = string.Equals(root, _selectedSourceRoot, StringComparison.OrdinalIgnoreCase)
@@ -798,6 +927,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         Sources.Clear();
         foreach (var option in options) Sources.Add(option);
+        RefreshExcludedPathOptions();
+    }
+
+    private void RefreshExcludedPathOptions()
+    {
+        ExcludedPathOptions.Clear();
+        foreach (var path in _settings.ExcludedSources.Distinct(StringComparer.OrdinalIgnoreCase))
+            ExcludedPathOptions.Add(new ExcludedPathOption { Path = path, Kind = "Источник", IsSource = true });
+        foreach (var path in _settings.ExcludedPaths.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var kind = File.Exists(path) ? "Файл" : Directory.Exists(path) ? "Папка" : "Путь";
+            ExcludedPathOptions.Add(new ExcludedPathOption { Path = path, Kind = kind, IsSource = false });
+        }
     }
 
     private void RebuildFormatFilters()

@@ -30,19 +30,23 @@ public sealed class MediaScanner
         "Program Files (x86)", "ProgramData", "Recovery", "$WinREAgent", "PerfLogs"
     };
 
-    public static IReadOnlyList<string> GetScanRoots(IEnumerable<string> extraFolders)
+    public static IReadOnlyList<string> GetScanRoots(IEnumerable<string> extraFolders, IEnumerable<string>? excludedSources = null, IEnumerable<string>? excludedPaths = null)
     {
+        var excluded = NormalizePathSet((excludedSources ?? []).Concat(excludedPaths ?? []));
         var overridden = Environment.GetEnvironmentVariable("PICALL_SCAN_ROOTS");
         if (!string.IsNullOrWhiteSpace(overridden))
             return overridden.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Where(Directory.Exists).Select(NormalizeRoot).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+                .Where(Directory.Exists).Select(NormalizeRoot)
+                .Where(root => !excluded.Contains(root))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
 
         var roots = new List<string>();
         try
         {
             roots.AddRange(DriveInfo.GetDrives()
                 .Where(d => d.IsReady && d.DriveType is DriveType.Fixed or DriveType.Removable)
-                .Select(d => NormalizeRoot(d.RootDirectory.FullName)));
+                .Select(d => NormalizeRoot(d.RootDirectory.FullName))
+                .Where(root => !excluded.Contains(root)));
         }
         catch { }
 
@@ -51,7 +55,7 @@ public sealed class MediaScanner
             try
             {
                 var normalized = NormalizeRoot(folder);
-                if (Directory.Exists(normalized) && !roots.Contains(normalized, StringComparer.OrdinalIgnoreCase)) roots.Add(normalized);
+                if (Directory.Exists(normalized) && !excluded.Contains(normalized) && !roots.Contains(normalized, StringComparer.OrdinalIgnoreCase)) roots.Add(normalized);
             }
             catch { }
         }
@@ -63,8 +67,10 @@ public sealed class MediaScanner
         IReadOnlyList<string> roots,
         Action<IReadOnlyList<MediaItem>>? newItems,
         IProgress<ScanProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IEnumerable<string>? excludedPaths = null)
     {
+        var excluded = NormalizePathSet(excludedPaths);
         var old = existing.GroupBy(x => x.Path, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(x => x.Key, x => x.First(), StringComparer.OrdinalIgnoreCase);
         var found = new ConcurrentDictionary<string, MediaItem>(StringComparer.OrdinalIgnoreCase);
@@ -81,7 +87,7 @@ public sealed class MediaScanner
         {
             await Task.Yield();
             var batch = new List<MediaItem>(96);
-            ScanRoot(root, old, found, batch, ref visited, ref errors, ref lastReport, newItems, progress, token);
+            ScanRoot(root, old, found, batch, ref visited, ref errors, ref lastReport, newItems, progress, token, excluded);
             FlushBatch(batch, newItems);
         });
 
@@ -99,7 +105,8 @@ public sealed class MediaScanner
         ref long lastReport,
         Action<IReadOnlyList<MediaItem>>? newItems,
         IProgress<ScanProgress>? progress,
-        CancellationToken token)
+        CancellationToken token,
+        IReadOnlySet<string> excludedPaths)
     {
         var directories = new Stack<(string Path, bool IsDriveRoot)>();
         directories.Push((root, IsDriveRoot(root)));
@@ -125,14 +132,14 @@ public sealed class MediaScanner
                     if ((entry.Attributes & FileAttributes.Directory) != 0)
                     {
                         if ((entry.Attributes & FileAttributes.ReparsePoint) != 0 && IsFileSystemLink(entry)) continue;
-                        if (ShouldIgnorePath(entry.FullName)) continue;
+                        if (ShouldIgnorePath(entry.FullName, excludedPaths)) continue;
                         if (isDriveRoot && DriveRootExclusions.Contains(entry.Name)) continue;
                         directories.Push((entry.FullName, false));
                         continue;
                     }
 
                     var extension = entry.Extension;
-                    if (ShouldIgnorePath(entry.FullName)) continue;
+                    if (ShouldIgnorePath(entry.FullName, excludedPaths)) continue;
                     var kind = PhotoExtensions.Contains(extension) ? MediaKind.Photo :
                         VideoExtensions.Contains(extension) ? MediaKind.Video : (MediaKind?)null;
                     if (kind is null) continue;
@@ -195,23 +202,25 @@ public sealed class MediaScanner
         PhotoExtensions.Concat(VideoExtensions).Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToArray();
 
-    public static bool ShouldIgnorePath(string path)
+    public static bool ShouldIgnorePath(string path, IEnumerable<string>? excludedPaths = null)
     {
         try
         {
             var full = System.IO.Path.GetFullPath(path).TrimEnd('\\', '/');
             var appData = System.IO.Path.GetFullPath(AppPaths.Root).TrimEnd('\\', '/');
-            return string.Equals(full, appData, StringComparison.OrdinalIgnoreCase) ||
-                   full.StartsWith(appData + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+            if (string.Equals(full, appData, StringComparison.OrdinalIgnoreCase) ||
+                full.StartsWith(appData + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return true;
+
+            return IsUnderAnyPath(full, excludedPaths);
         }
         catch { return false; }
     }
 
-    public static MediaItem? ReadMediaFile(string path, bool isFavorite = false)
+    public static MediaItem? ReadMediaFile(string path, bool isFavorite = false, IEnumerable<string>? excludedPaths = null)
     {
         try
         {
-            if (ShouldIgnorePath(path)) return null;
+            if (ShouldIgnorePath(path, excludedPaths)) return null;
             var extension = System.IO.Path.GetExtension(path);
             var kind = PhotoExtensions.Contains(extension) ? MediaKind.Photo :
                 VideoExtensions.Contains(extension) ? MediaKind.Video : (MediaKind?)null;
@@ -251,6 +260,34 @@ public sealed class MediaScanner
         var driveRoot = System.IO.Path.GetPathRoot(full);
         return string.Equals(full.TrimEnd('\\', '/'), driveRoot?.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase)
             ? driveRoot! : full.TrimEnd('\\', '/');
+    }
+
+    public static string NormalizePath(string path)
+    {
+        try
+        {
+            var full = System.IO.Path.GetFullPath(Environment.ExpandEnvironmentVariables(path));
+            var root = System.IO.Path.GetPathRoot(full);
+            return string.Equals(full.TrimEnd('\\', '/'), root?.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase)
+                ? root! : full.TrimEnd('\\', '/');
+        }
+        catch { return path.Trim(); }
+    }
+
+    private static HashSet<string> NormalizePathSet(IEnumerable<string>? paths) =>
+        (paths ?? []).Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(NormalizePath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    private static bool IsUnderAnyPath(string fullPath, IEnumerable<string>? paths)
+    {
+        foreach (var path in paths ?? [])
+        {
+            var normalized = NormalizePath(path);
+            if (string.Equals(fullPath, normalized, StringComparison.OrdinalIgnoreCase) ||
+                fullPath.StartsWith(normalized + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
     }
 
 }

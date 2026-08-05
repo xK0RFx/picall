@@ -8,7 +8,7 @@ public static class IndexStore
     private const string Signature = "PICALL02";
     private static readonly SemaphoreSlim SaveGate = new(1, 1);
 
-    public static List<MediaItem> Load(HashSet<string> favorites)
+    public static List<MediaItem> Load(HashSet<string> favorites, IEnumerable<string>? excludedPaths = null)
     {
         var items = new List<MediaItem>();
         try
@@ -34,7 +34,7 @@ public static class IndexStore
                     Kind = (MediaKind)reader.ReadByte(),
                     IsFavorite = favorites.Contains(path)
                 };
-                if (!MediaScanner.ShouldIgnorePath(item.Path)) items.Add(item);
+                if (!MediaScanner.ShouldIgnorePath(item.Path, excludedPaths)) items.Add(item);
             }
         }
         catch
@@ -45,9 +45,9 @@ public static class IndexStore
         return items.GroupBy(x => x.Path, StringComparer.OrdinalIgnoreCase).Select(x => x.First()).ToList();
     }
 
-    public static async Task SaveAsync(IReadOnlyCollection<MediaItem> items, CancellationToken cancellationToken = default)
+    public static async Task SaveAsync(IReadOnlyCollection<MediaItem> items, IEnumerable<string>? excludedPaths = null, CancellationToken cancellationToken = default)
     {
-        var persistedItems = items.Where(x => !MediaScanner.ShouldIgnorePath(x.Path))
+        var persistedItems = items.Where(x => !MediaScanner.ShouldIgnorePath(x.Path, excludedPaths))
             .GroupBy(x => x.Path, StringComparer.OrdinalIgnoreCase)
             .Select(x => x.First()).ToArray();
         await SaveGate.WaitAsync(cancellationToken);
